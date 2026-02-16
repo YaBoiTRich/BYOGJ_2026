@@ -23,6 +23,7 @@ namespace StarterAssets
 
 		public Rigidbody m_Rigidbody;
 		public float m_Thrust = 20f;
+		public float m_PullForce = 25f;
 
 		[Space(10)]
 		[Tooltip("The height the player can jump")]
@@ -54,6 +55,11 @@ namespace StarterAssets
 		[Tooltip("How far in degrees can you move the camera down")]
 		public float BottomClamp = -90.0f;
 
+		[Header("Raycasting Settings")] 
+		public float raycastDistance;
+		public LineRenderer lineRenderer;
+		public GameObject lineRendererStart;
+		
 		// cinemachine
 		private float _cinemachineTargetPitch;
 
@@ -88,9 +94,15 @@ namespace StarterAssets
 				#endif
 			}
 		}
+		
+		LayerMask layerMask;
+		LayerMask finalMask;
 
 		private void Awake()
 		{
+			layerMask = LayerMask.GetMask("Ignore Raycast");
+			finalMask = ~layerMask; 	
+			
 			// get a reference to our main camera
 			if (_mainCamera == null)
 			{
@@ -108,6 +120,7 @@ namespace StarterAssets
 			Debug.LogError( "Starter Assets package is missing dependencies. Please use Tools/Starter Assets/Reinstall Dependencies to fix it");
 #endif
 
+			
 			// reset our timeouts on start
 			_jumpTimeoutDelta = JumpTimeout;
 			_fallTimeoutDelta = FallTimeout;
@@ -115,13 +128,12 @@ namespace StarterAssets
 
 		private void Update()
 		{
-			//JumpAndGravity();
-			//GroundedCheck();
-			//Move();
 		}
 
 		private void FixedUpdate()
 		{
+			RaycastHandler();
+			
 			// normalise input direction
 			Vector3 inputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
 
@@ -131,24 +143,49 @@ namespace StarterAssets
 			{
 				// move
 				inputDirection = CinemachineCameraTarget.transform.right * _input.move.x + CinemachineCameraTarget.transform.forward * _input.move.y;
-				m_Rigidbody.AddForce(inputDirection * m_Thrust);
-				//m_Rigidbody.AddForce(inputDirection * m_Thrust);
 			}
 			
+			m_Rigidbody.AddForce(inputDirection * m_Thrust);
+			
+		}
+
+		private void RaycastHandler()
+		{
+			RaycastHit hit;
+			
+			if (Physics.Raycast(_mainCamera.transform.position, _mainCamera.transform.TransformDirection(Vector3.forward), out hit, raycastDistance, finalMask))
+			{
+				lineRenderer.enabled = true;
+				lineRenderer.SetPosition(0, lineRendererStart.transform.position);
+				lineRenderer.SetPosition(1, hit.point);
+				// Debug.DrawRay(_mainCamera.transform.position, _mainCamera.transform.TransformDirection(Vector3.forward) * raycastDistance, Color.yellow);
+				
+				if (_playerInput.actions["Primary"].IsPressed())
+				{
+					var heading = (hit.point - lineRendererStart.transform.position).normalized;
+					m_Rigidbody.AddForce(_mainCamera.transform.forward + heading * m_PullForce);
+				}
+
+				if (_playerInput.actions["Primary"].WasReleasedThisFrame())
+				{
+					m_Rigidbody.linearVelocity = Vector3.zero;
+					
+				}
+				
+				// var time = Time.deltaTime;
+				// Debug.Log(time + ": Did Hit");
+			}
+			else
+			{
+				lineRenderer.enabled = false;
+			}
 		}
 
 		private void LateUpdate()
 		{
 			CameraRotation();
 		}
-
-		private void GroundedCheck()
-		{
-			// set sphere position, with offset
-			Vector3 spherePosition = new Vector3(transform.position.x, transform.position.y - GroundedOffset, transform.position.z);
-			Grounded = Physics.CheckSphere(spherePosition, GroundedRadius, GroundLayers, QueryTriggerInteraction.Ignore);
-		}
-
+		
 		private void CameraRotation()
 		{
 			// if there is an input
@@ -168,101 +205,6 @@ namespace StarterAssets
 
 				// rotate the player left and right
 				transform.Rotate(Vector3.up * _rotationVelocity);
-			}
-		}
-
-		private void Move()
-		{
-			// set target speed based on move speed, sprint speed and if sprint is pressed
-			float targetSpeed = _input.sprint ? SprintSpeed : MoveSpeed;
-
-			// a simplistic acceleration and deceleration designed to be easy to remove, replace, or iterate upon
-
-			// note: Vector2's == operator uses approximation so is not floating point error prone, and is cheaper than magnitude
-			// if there is no input, set the target speed to 0
-			if (_input.move == Vector2.zero) targetSpeed = 0.0f;
-
-			// a reference to the players current horizontal velocity
-			float currentHorizontalSpeed = new Vector3(_controller.velocity.x, 0.0f, _controller.velocity.z).magnitude;
-
-			float speedOffset = 0.1f;
-			float inputMagnitude = _input.analogMovement ? _input.move.magnitude : 1f;
-
-			// accelerate or decelerate to target speed
-			if (currentHorizontalSpeed < targetSpeed - speedOffset || currentHorizontalSpeed > targetSpeed + speedOffset)
-			{
-				// creates curved result rather than a linear one giving a more organic speed change
-				// note T in Lerp is clamped, so we don't need to clamp our speed
-				_speed = Mathf.Lerp(currentHorizontalSpeed, targetSpeed * inputMagnitude, Time.deltaTime * SpeedChangeRate);
-
-				// round speed to 3 decimal places
-				_speed = Mathf.Round(_speed * 1000f) / 1000f;
-			}
-			else
-			{
-				_speed = targetSpeed;
-			}
-
-			// normalise input direction
-			Vector3 inputDirection = new Vector3(_input.move.x, 0.0f, _input.move.y).normalized;
-
-			// note: Vector2's != operator uses approximation so is not floating point error prone, and is cheaper than magnitude
-			// if there is a move input rotate player when the player is moving
-			if (_input.move != Vector2.zero)
-			{
-				// move
-				inputDirection = transform.right * _input.move.x + transform.forward * _input.move.y;
-			}
-
-			// move the player
-			_controller.Move(inputDirection.normalized * (_speed * Time.deltaTime) + new Vector3(0.0f, _verticalVelocity, 0.0f) * Time.deltaTime);
-		}
-
-		private void JumpAndGravity()
-		{
-			if (Grounded)
-			{
-				// reset the fall timeout timer
-				_fallTimeoutDelta = FallTimeout;
-
-				// stop our velocity dropping infinitely when grounded
-				if (_verticalVelocity < 0.0f)
-				{
-					_verticalVelocity = -2f;
-				}
-
-				// Jump
-				if (_input.jump && _jumpTimeoutDelta <= 0.0f)
-				{
-					// the square root of H * -2 * G = how much velocity needed to reach desired height
-					_verticalVelocity = Mathf.Sqrt(JumpHeight * -2f * Gravity);
-				}
-
-				// jump timeout
-				if (_jumpTimeoutDelta >= 0.0f)
-				{
-					_jumpTimeoutDelta -= Time.deltaTime;
-				}
-			}
-			else
-			{
-				// reset the jump timeout timer
-				_jumpTimeoutDelta = JumpTimeout;
-
-				// fall timeout
-				if (_fallTimeoutDelta >= 0.0f)
-				{
-					_fallTimeoutDelta -= Time.deltaTime;
-				}
-
-				// if we are not grounded, do not jump
-				_input.jump = false;
-			}
-
-			// apply gravity over time if under terminal (multiply by delta time twice to linearly speed up over time)
-			if (_verticalVelocity < _terminalVelocity)
-			{
-				_verticalVelocity += Gravity * Time.deltaTime;
 			}
 		}
 
