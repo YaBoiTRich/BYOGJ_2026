@@ -760,6 +760,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 2158426426994849973, guid: e0eddcd2e6fc24def8b7c18517c243d9, type: 3}
+      propertyPath: raycastDistance
+      value: 40
+      objectReference: {fileID: 0}
     - target: {fileID: 8616685848737228372, guid: e0eddcd2e6fc24def8b7c18517c243d9, type: 3}
       propertyPath: m_Name
       value: Player ZeroG
